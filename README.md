@@ -7,6 +7,10 @@ This project provides a browser workflow for importing transactions from CFNA in
 
 Direct API calls from `cfna.com` to Lunch Money are blocked, so this is intentionally a two-step process.
 
+Need Help?
+- Join the conversation in the [Lunch Money Bookmarklets Channel on Discord](https://discord.com/channels/842337014556262411/1480708918391996588)
+
+
 ## Recommended Setup (No Clone)
 
 ### Option A: Loader flow (recommended)
