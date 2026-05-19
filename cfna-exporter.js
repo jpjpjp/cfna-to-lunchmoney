@@ -1,4 +1,9 @@
 (() => {
+  const extractRefId = (text) => {
+    const m = (text || "").match(/Ref#\s*([A-Za-z0-9-]+)/i);
+    return m ? m[1].trim() : "";
+  };
+
   const toISO = (s) => {
     const m = (s || "").trim().match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
     return m ? `${m[3]}-${m[1]}-${m[2]}` : (s || "").trim();
@@ -13,7 +18,7 @@
 
   const uniq = (arr) => [...new Set(arr.filter(Boolean).map((x) => x.trim()).filter(Boolean))];
 
-  const parseDoc = (doc, includePending) => {
+  const parseDoc = (doc) => {
     const rows = [...doc.querySelectorAll("#latest-account-transactions-table tbody tr")];
 
     return rows
@@ -30,13 +35,13 @@
           ""
         ).trim();
 
-        const details = uniq([...tr.querySelectorAll(".accordion-collapse > div")].map((d) => d.innerText));
-        const external_id = (details.find((x) => /^Ref#\s*/i.test(x)) || "")
-          .replace(/^Ref#\s*/i, "")
-          .trim();
+        const details = uniq([...tr.querySelectorAll(".accordion-collapse > div, .accordion-collapse li")].map((d) => d.innerText));
+        const external_id =
+          extractRefId(details.find((x) => /Ref#/i.test(x)) || "") ||
+          extractRefId(tr.innerText || "");
         const isPending = details.some((x) => /transaction pending/i.test(x));
 
-        if (isPending && !includePending) return null;
+        if (isPending) return null;
 
         const cleanedDetails = details.filter(
           (x) => !/^Ref#\s*/i.test(x) && !/transaction pending/i.test(x) && x !== cardholder
@@ -52,19 +57,19 @@
           amount,
           notes,
           external_id: external_id || undefined,
-          status: isPending ? "uncleared" : "cleared",
+          status: "unreviewed",
         };
       })
       .filter(Boolean);
   };
 
-  const fetchAndParseFallback = async (includePending) => {
+  const fetchAndParseFallback = async () => {
     for (const ep of ["/cardholder/transaction-history", "/cardholder/latest-account-transactions"]) {
       try {
         const res = await fetch(ep, { credentials: "include" });
         const html = await res.text();
         const doc = new DOMParser().parseFromString(html, "text/html");
-        const txns = parseDoc(doc, includePending);
+        const txns = parseDoc(doc);
         if (txns.length) return txns;
       } catch (_) {
         // Try next endpoint.
@@ -83,11 +88,9 @@
   };
 
   const run = async () => {
-    const includePending = confirm("Include pending transactions? OK=yes, Cancel=no");
-
-    let txns = parseDoc(document, includePending);
+    let txns = parseDoc(document);
     if (!txns.length) {
-      txns = await fetchAndParseFallback(includePending);
+      txns = await fetchAndParseFallback();
     }
 
     if (!txns.length) {

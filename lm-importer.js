@@ -15,11 +15,22 @@
 
   const isV2Base = (apiBase) => /\/v2(?:$|\/)/.test(apiBase);
 
-  const mapStatusForV2 = (status) => {
-    if (status === "reviewed" || status === "unreviewed") return status;
-    if (status === "cleared") return "reviewed";
-    if (status === "uncleared") return "unreviewed";
-    return "unreviewed";
+  const summarizeExternalIds = (transactions) => {
+    let missing = 0;
+    const seen = new Set();
+    const dupes = new Set();
+
+    for (const t of transactions) {
+      const id = String(t?.external_id || "").trim();
+      if (!id) {
+        missing += 1;
+        continue;
+      }
+      if (seen.has(id)) dupes.add(id);
+      seen.add(id);
+    }
+
+    return { missing, duplicates: [...dupes] };
   };
 
   const normalizeTransactions = (transactions, { apiBase, accountId }) => {
@@ -27,7 +38,7 @@
     return transactions.map((t) => {
       const tx = { ...t };
       if (v2) {
-        tx.status = mapStatusForV2(tx.status);
+        tx.status = "unreviewed";
         tx.manual_account_id = Number(accountId);
         delete tx.account_id;
       } else {
@@ -98,7 +109,14 @@ If no file dialog appears, click this bookmark again and try once more.`);
       throw new Error(`HTTP ${res.status} on ${url}: ${text.slice(0, 1200)}`);
     }
 
-    return { url, status: res.status, text };
+    let data = null;
+    try {
+      data = text ? JSON.parse(text) : null;
+    } catch (_) {
+      // Some environments may return non-JSON text despite success.
+    }
+
+    return { url, status: res.status, text, data };
   };
 
   const run = async () => {
@@ -154,11 +172,27 @@ If no file dialog appears, click this bookmark again and try once more.`);
     }
 
     const normalized = normalizeTransactions(transactions, { apiBase, accountId });
+    const ext = summarizeExternalIds(normalized);
+    if (ext.missing || ext.duplicates.length) {
+      const lines = [];
+      if (ext.missing) lines.push(`- Missing external_id: ${ext.missing}`);
+      if (ext.duplicates.length) lines.push(`- Duplicate external_id in file: ${ext.duplicates.slice(0, 10).join(", ")}`);
+      console.warn("[LM importer] external_id issues", ext);
+      alert(`Warning: external_id quality issues detected before import:\n${lines.join("\n")}`);
+    }
 
     try {
       const result = await postTransactions({ transactions: normalized, token, apiBase });
+      const importedCount = Array.isArray(result.data?.transactions)
+        ? result.data.transactions.length
+        : normalized.length;
+      const skippedDuplicatesCount = Array.isArray(result.data?.skipped_duplicates)
+        ? result.data.skipped_duplicates.length
+        : 0;
       console.log("[LM importer] success", result);
-      alert(`Imported ${normalized.length} transaction(s) via ${result.url}.`);
+      alert(
+        `Import completed via ${result.url}.\nImported: ${importedCount}\nSkipped duplicates: ${skippedDuplicatesCount}`
+      );
     } catch (e) {
       console.error("[LM importer] failed", e);
       alert(`Import failed: ${e?.message || e}`);

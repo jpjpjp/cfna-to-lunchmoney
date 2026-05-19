@@ -46,17 +46,28 @@ if (!Array.isArray(txns)) {
   process.exit(1);
 }
 
-const mapStatusForV2 = (status) => {
-  if (status === "reviewed" || status === "unreviewed") return status;
-  if (status === "cleared") return "reviewed";
-  if (status === "uncleared") return "unreviewed";
-  return "unreviewed";
+const summarizeExternalIds = (transactions) => {
+  let missing = 0;
+  const seen = new Set();
+  const dupes = new Set();
+
+  for (const t of transactions) {
+    const id = String(t?.external_id || "").trim();
+    if (!id) {
+      missing += 1;
+      continue;
+    }
+    if (seen.has(id)) dupes.add(id);
+    seen.add(id);
+  }
+
+  return { missing, duplicates: [...dupes] };
 };
 
 txns = txns.map((t) => {
   const tx = { ...t };
   if (IS_V2) {
-    tx.status = mapStatusForV2(tx.status);
+    tx.status = "unreviewed";
     tx.manual_account_id = LM_MANUAL_ACCOUNT_ID;
     delete tx.account_id;
   } else {
@@ -66,6 +77,10 @@ txns = txns.map((t) => {
 });
 
 const payload = { transactions: txns };
+const ext = summarizeExternalIds(txns);
+if (ext.missing || ext.duplicates.length) {
+  console.warn("[LM CLI importer] external_id issues:", ext);
+}
 
 (async () => {
   const res = await fetch(`${LM_BASE}/transactions`, {
